@@ -1,39 +1,25 @@
-from fastapi import FastAPI, Request
-from typing import Dict, List
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
+import requests
 import json
 from dotenv import load_dotenv
+
 load_dotenv()
 
-# -------------------------
-# FastAPI App
-# -------------------------
-app = FastAPI(title="HBDI Personality JSON API with LangChain")
-
-# السماح بـ CORS لتسهيل التواصل مع الفرونت أند
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = Flask(__name__)
+CORS(app)  # السماح بـ CORS لجميع النطاقات
 
 # -------------------------
-# إعداد LangChain LLM
+# إعدادات OpenAI
 # -------------------------
-llm = ChatOpenAI(
-    model_name="gpt-4o-mini",
-    temperature=0.7,
-    api_key=os.getenv("spi")
-)
+API_KEY = os.getenv("spi")
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
 # -------------------------
 # قالب البرومبت
 # -------------------------
-prompt_template = """
+PROMPT_TEMPLATE = """
 أنت خبير في مقياس بصمة التفكير المطور بواسطة د. سلطان العتيبي. 
 
 المستخدم حقق هذه المقاييس (من 0 إلى 100):
@@ -62,32 +48,42 @@ prompt_template = """
 - جميع النصوص بالعربية الفصحى وبأسلوب احترافي وجذاب.
 """
 
-prompt = ChatPromptTemplate.from_template(prompt_template)
-
-# LangChain LCEL pipeline
-chain = prompt | llm
-
-# -------------------------
-# Endpoint
-# -------------------------
-@app.post("/api/generate_hbdi_json")
-async def generate_hbdi_json(request: Request):
+@app.route("/api/generate_hbdi_json", methods=["POST"])
+def generate_hbdi_json():
     try:
-        # قراءة البيانات الخام من الطلب بدون Pydantic
-        body = await request.json()
+        # قراءة البيانات الخام من الطلب
+        body = request.get_json()
         metrics = body.get("metrics", {})
-        
         metrics_text = "\n".join([f"{k}: {v}" for k, v in metrics.items()])
         
-        # استدعاء السلسلة
-        response = chain.invoke({
-            "metrics_text": metrics_text
-        })
+        # تجهيز البرومبت النهائي
+        final_prompt = PROMPT_TEMPLATE.format(metrics_text=metrics_text)
         
-        # استخراج النص وتنظيفه إذا كان يحتوي على ماردكاوان
-        output_text = response.content.strip()
+        # استدعاء OpenAI مباشرة عبر requests
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {API_KEY}"
+        }
+        
+        payload = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": "You are a personality analysis expert."},
+                {"role": "user", "content": final_prompt}
+            ],
+            "temperature": 0.7
+        }
+        
+        response = requests.post(OPENAI_URL, headers=headers, json=payload, timeout=30)
+        response_data = response.json()
+        
+        if "choices" not in response_data:
+            return jsonify({"error": "OpenAI API Error", "details": response_data}), 500
+            
+        output_text = response_data["choices"][0]["message"]["content"].strip()
+        
+        # تنظيف النص من علامات الـ Markdown إذا وُجدت
         if output_text.startswith("```"):
-            # إزالة علامات ```json و ```
             lines = output_text.split("\n")
             if lines[0].startswith("```"):
                 lines = lines[1:]
@@ -97,7 +93,11 @@ async def generate_hbdi_json(request: Request):
             
         json_data = json.loads(output_text)
         
-        return {"hbdi_json": json_data}
+        return jsonify({"hbdi_json": json_data})
+        
     except Exception as e:
         print(f"Error: {str(e)}")
-        return {"error": str(e), "hbdi_json": None}
+        return jsonify({"error": str(e), "hbdi_json": None}), 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
