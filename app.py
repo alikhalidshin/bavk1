@@ -1,12 +1,10 @@
-# app_langchain.py
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Request
 from typing import Dict, List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import json
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,27 +22,6 @@ app.add_middleware(
 )
 
 # -------------------------
-# مدخل البيانات من المستخدم
-# -------------------------
-class MetricsInput(BaseModel):
-    metrics: Dict[str, int]  # 8 مقاييس
-
-# -------------------------
-# نموذج Pydantic للـ JSON النهائي
-# -------------------------
-class HBDIJson(BaseModel):
-    metrics: Dict[str, int]
-    dominant_quadrant: Dict[str, str]
-    headline_description: Dict[str, str]
-    mind_mechanism: Dict[str, str]
-    key_capabilities: list
-    unique_fingerprint: list
-    detailed_personality_profile: Dict[str, str]
-    unsuitable_environments: list
-    recommended_careers: list
-    core_strengths: Dict[str, list]
-
-# -------------------------
 # إعداد LangChain LLM
 # -------------------------
 llm = ChatOpenAI(
@@ -54,45 +31,73 @@ llm = ChatOpenAI(
 )
 
 # -------------------------
-# إعداد Output Parser
-# -------------------------
-output_parser = PydanticOutputParser(pydantic_object=HBDIJson)
-
-# -------------------------
 # قالب البرومبت
 # -------------------------
 prompt_template = """
-أنت خبير في تحليل الشخصية حسب HBDI. 
+أنت خبير في مقياس بصمة التفكير المطور بواسطة د. سلطان العتيبي. 
 
-المستخدم حقق هذه المقاييس:
+المستخدم حقق هذه المقاييس (من 0 إلى 100):
 {metrics_text}
 
-استخدم هذه التعليمات لتنسيق المخرجات:
-{format_instructions}
+يجب أن تقوم بإرجاع الرد بتنسيق JSON حصراً لتسهيل عملية قراءته برمجياً. 
+لا تضف أي نص خارج كائن JSON النهائي ولا تستخدم Markdown blocks (مثل ```json).
 
-- استخدم القيم لتحديد dominant_quadrant والربع المهيمن
-- املأ كل الحقول الأخرى بناءً على dominant_quadrant
-- JSON يجب أن يكون جاهز للعرض مباشرة على صفحة التقرير
-- لا تخرج عن الهيكل، لا تكتب نصوص خارج JSON
-- جميع النصوص بالعربية الفصحى وبأسلوب احترافي
+هيكل الـ JSON المطلوب بدقة:
+{{
+    "metrics": {{ "الاستدلال": int, "القياس": int, "النظم": int, "التنفيذ": int, "التأثير": int, "التعاطف": int, "الابتكار": int, "التجريب": int }},
+    "dominant_quadrant": {{ "الربع المهيمن": "اسم الربع", "color": "#xxx" }},
+    "headline_description": {{ "وصف العنوان": "نص قصير جذاب" }},
+    "mind_mechanism": {{ "آلية التفكير": "شرح مفصل" }},
+    "key_capabilities": ["ميزة 1", "ميزة 2", "ميزة 3", "ميزة 4"],
+    "unique_fingerprint": ["بصمة 1", "بصمة 2", "بصمة 3"],
+    "detailed_personality_profile": {{ "الملف الشخصي المفصل": "شرح مفصل وعميق" }},
+    "unsuitable_environments": [{{ "name": "بيئة", "reason": "سبب" }}, ...],
+    "recommended_careers": [{{ "title": "وظيفة", "description": "سبب" }}, ...],
+    "core_strengths": {{ "نقاط القوة الأساسية": ["نقطة 1", "نقطة 2", "نقطة 3"], "quote": "مقولة ملهمة تلخص النمط" }}
+}}
+
+- استخدم القيم المعطاة لتحديد الربع المهيمن.
+- املأ كل الحقول بناءً على الربع المهيمن وفق نموذج د. سلطان العتيبي.
+- لا تذكر اسم "HBDI" أو "هيرمان" في الرد، استخدم "بصمة التفكير".
+- جميع النصوص بالعربية الفصحى وبأسلوب احترافي وجذاب.
 """
 
 prompt = ChatPromptTemplate.from_template(prompt_template)
 
 # LangChain LCEL pipeline
-chain = prompt | llm | output_parser
+chain = prompt | llm
 
 # -------------------------
 # Endpoint
 # -------------------------
 @app.post("/api/generate_hbdi_json")
-async def generate_hbdi_json(input_data: MetricsInput):
-    metrics_text = "\n".join([f"{k}: {v}" for k, v in input_data.metrics.items()])
+async def generate_hbdi_json(request: Request):
     try:
-        result = chain.invoke({
-            "metrics_text": metrics_text,
-            "format_instructions": output_parser.get_format_instructions()
+        # قراءة البيانات الخام من الطلب بدون Pydantic
+        body = await request.json()
+        metrics = body.get("metrics", {})
+        
+        metrics_text = "\n".join([f"{k}: {v}" for k, v in metrics.items()])
+        
+        # استدعاء السلسلة
+        response = chain.invoke({
+            "metrics_text": metrics_text
         })
-        return {"hbdi_json": result.model_dump()}
+        
+        # استخراج النص وتنظيفه إذا كان يحتوي على ماردكاوان
+        output_text = response.content.strip()
+        if output_text.startswith("```"):
+            # إزالة علامات ```json و ```
+            lines = output_text.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].startswith("```"):
+                lines = lines[:-1]
+            output_text = "\n".join(lines).strip()
+            
+        json_data = json.loads(output_text)
+        
+        return {"hbdi_json": json_data}
     except Exception as e:
+        print(f"Error: {str(e)}")
         return {"error": str(e), "hbdi_json": None}
