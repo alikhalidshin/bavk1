@@ -93,8 +93,7 @@ pure_eval==0.2.3
 pyasn1==0.6.2
 pyasn1_modules==0.4.2
 pycparser==3.0
-pydantic
-pydantic_core2
+
 pydub==0.25.1
 Pygments==2.19.2
 PyJWT==2.11.0
