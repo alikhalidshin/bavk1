@@ -8,7 +8,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # السماح بـ CORS لجميع النطاقات
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 # -------------------------
 # إعدادات OpenAI
@@ -51,8 +58,11 @@ PROMPT_TEMPLATE = """
 - جميع النصوص بالعربية الفصحى وبأسلوب احترافي وجذاب.
 """
 
-@app.route("/api/generate_hbdi_json", methods=["POST"])
+@app.route("/api/generate_hbdi_json", methods=["POST", "OPTIONS"])
 def generate_hbdi_json():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+        
     try:
         # قراءة البيانات الخام من الطلب
         body = request.get_json()
