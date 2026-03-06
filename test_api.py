@@ -2,7 +2,7 @@ import requests
 import json
 
 def test_api():
-    url = "http://localhost:8000/api/generate_hbdi_json"
+    url = "https://bavk1-production.up.railway.app/api/generate_hbdi_json"
     payload = {
         "metrics": {
             "الاستدلال": 80,
@@ -23,7 +23,7 @@ def test_api():
         # Note: This requires the server to be running. 
         # Since I can't guarantee it's running in this environment, 
         # I'll also do a code-level check.
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=60)
         print(f"Status Code: {response.status_code}")
         if response.status_code == 200:
             print("Response JSON Structure:")

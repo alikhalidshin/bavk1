@@ -43,17 +43,17 @@ PROMPT_TEMPLATE = """
     "metrics": {{ "الاستدلال": int, "القياس": int, "النظم": int, "التنفيذ": int, "التأثير": int, "التعاطف": int, "الابتكار": int, "التجريب": int }},
     "dominant_quadrant": {{ "الربع المهيمن": "اسم الربع", "color": "#xxx" }},
     "headline_description": {{ "وصف العنوان": "نص قصير جذاب" }},
-    "mind_mechanism": {{ "آلية التفكير": "شرح مفصل" }},
-    "key_capabilities": ["ميزة 1", "ميزة 2", "ميزة 3", "ميزة 4"],
-    "unique_fingerprint": ["بصمة 1", "بصمة 2", "بصمة 3"],
-    "detailed_personality_profile": {{ "الملف الشخصي المفصل": "شرح مفصل وعميق" }},
-    "unsuitable_environments": [{{ "name": "بيئة", "reason": "سبب" }}, ...],
-    "recommended_careers": [{{ "title": "وظيفة", "description": "سبب" }}, ...],
-    "core_strengths": {{ "نقاط القوة الأساسية": ["نقطة 1", "نقطة 2", "نقطة 3"], "quote": "مقولة ملهمة تلخص النمط" }}
+    "mind_mechanism": {{ "آلية التفكير": "شرح موجز لا يتعدى سطر واحد" }},
+    "key_capabilities": ["ميزة 1", "ميزة 2", "ميزة 3"],
+    "unique_fingerprint": ["بصمة 1", "بصمة 2"],
+    "detailed_personality_profile": {{ "الملف الشخصي المفصل": "شرح موجز لا يتعدى سطرين" }},
+    "unsuitable_environments": [{{"name": "بيئة", "reason": "سبب مختصر"}}],
+    "recommended_careers": [{{"title": "وظيفة", "description": "سبب مختصر"}}],
+    "core_strengths": {{ "نقاط القوة الأساسية": ["نقطة 1", "نقطة 2"], "quote": "مقولة قصيرة ملهمة" }}
 }}
 
 - استخدم القيم المعطاة لتحديد الربع المهيمن.
-- املأ كل الحقول بناءً على الربع المهيمن وفق نموذج د. سلطان العتيبي.
+- املأ كل الحقول بناءً على الربع المهيمن وفق نموذج د. سلطان العتيبي بأسلوب موجز وسريع.
 - لا تذكر اسم "HBDI" أو "هيرمان" في الرد، استخدم "بصمة التفكير".
 - جميع النصوص بالعربية الفصحى وبأسلوب احترافي وجذاب.
 """
@@ -84,29 +84,32 @@ def generate_hbdi_json():
                 {"role": "system", "content": "You are a personality analysis expert."},
                 {"role": "user", "content": final_prompt}
             ],
-            "temperature": 0.7
+            "temperature": 0.7,
+            "max_tokens": 800,
+            "stream": True # Enable streaming
         }
         
-        response = requests.post(OPENAI_URL, headers=headers, json=payload, timeout=30)
-        response_data = response.json()
-        
-        if "choices" not in response_data:
-            return jsonify({"error": "OpenAI API Error", "details": response_data}), 500
-            
-        output_text = response_data["choices"][0]["message"]["content"].strip()
-        
-        # تنظيف النص من علامات الـ Markdown إذا وُجدت
-        if output_text.startswith("```"):
-            lines = output_text.split("\n")
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines[-1].startswith("```"):
-                lines = lines[:-1]
-            output_text = "\n".join(lines).strip()
-            
-        json_data = json.loads(output_text)
-        
-        return jsonify({"hbdi_json": json_data})
+        def generate():
+            # Send streaming POST request to OpenAI
+            response = requests.post(OPENAI_URL, headers=headers, json=payload, stream=True, timeout=60)
+            for line in response.iter_lines():
+                if line:
+                    decoded_line = line.decode('utf-8')
+                    if decoded_line.startswith("data: "):
+                        data_str = decoded_line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            # Parse out the delta text (token)
+                            data_json = json.loads(data_str)
+                            delta = data_json["choices"][0]["delta"].get("content", "")
+                            if delta:
+                                yield delta
+                        except Exception:
+                            pass
+                            
+        # Return the generator string as an SSE/raw stream
+        return app.response_class(generate(), mimetype='text/plain')
         
     except Exception as e:
         print(f"Error: {str(e)}")
