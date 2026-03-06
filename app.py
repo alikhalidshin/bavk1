@@ -79,37 +79,24 @@ def generate_hbdi_json():
         }
         
         payload = {
-            "model": "gpt-4o-mini",
+            "model": "gpt-4o",
             "messages": [
-                {"role": "system", "content": "You are a personality analysis expert."},
+                {"role": "system", "content": "أنت خبير في مقياس هيرمان (HBDI) وتحليل الشخصيات وأساليب التفكير. قم بالرد فقط بتنسيق JSON صالح وبدون أي نصوص إضافية قبله أو بعده."},
                 {"role": "user", "content": final_prompt}
             ],
             "temperature": 0.7,
             "max_tokens": 800,
-            "stream": True # Enable streaming
+            "response_format": { "type": "json_object" }
         }
         
-        def generate():
-            # Send streaming POST request to OpenAI
-            response = requests.post(OPENAI_URL, headers=headers, json=payload, stream=True, timeout=60)
-            for line in response.iter_lines():
-                if line:
-                    decoded_line = line.decode('utf-8')
-                    if decoded_line.startswith("data: "):
-                        data_str = decoded_line[6:]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            # Parse out the delta text (token)
-                            data_json = json.loads(data_str)
-                            delta = data_json["choices"][0]["delta"].get("content", "")
-                            if delta:
-                                yield delta
-                        except Exception:
-                            pass
-                            
-        # Return the generator string as an SSE/raw stream
-        return app.response_class(generate(), mimetype='text/plain')
+        response = requests.post(OPENAI_URL, headers=headers, json=payload, timeout=60)
+        response_data = response.json()
+        
+        # Extract the assistant's reply
+        content = response_data["choices"][0]["message"]["content"]
+        
+        # Parse it to ensure it's valid JSON and return it
+        return jsonify({"hbdi_json": json.loads(content)})
         
     except Exception as e:
         print(f"Error: {str(e)}")
